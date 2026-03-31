@@ -1,22 +1,45 @@
 import os
 import requests
+import re
+import subprocess
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 MODEL = "llama-3.1-8b-instant"
 
 
+# 🧹 CLEAN OUTPUT
 def clean_llm_output(text):
     if not text:
         return None
 
+    # remove markdown
     text = text.replace("```java", "").replace("```", "")
 
+    # keep only from package
     if "package " in text:
         text = text[text.index("package "):]
+
+    # remove anything AFTER last closing brace
+    last_brace = text.rfind("}")
+    if last_brace != -1:
+        text = text[:last_brace + 1]
 
     return text.strip()
 
 
+# 🧠 BASIC STRUCTURE VALIDATION
+def is_valid_java_test(code):
+    if not code:
+        return False
+
+    return (
+        "class " in code and
+        "@Test" in code and
+        code.count("{") >= code.count("}")
+    )
+
+
+# 🧱 LAYER DETECTION
 def detect_layer(path):
     if "controller" in path:
         return "controller"
@@ -30,23 +53,26 @@ def detect_layer(path):
         return "misc"
 
 
+# 🤖 LLM CALL
 def generate_test(java_code, class_name, layer):
     prompt = f"""
 You are a senior Java backend engineer.
 
 Generate STRICTLY VALID JUnit 5 + Mockito test class.
 
-Rules:
+STRICT RULES:
+- ONLY Java code
+- NO explanations
 - NO markdown
-- NO explanation
-- ONLY pure Java code
-- Must include correct package
-- Package must be: com.example.demo.{layer}
-- Class name: {class_name}Test
-- Include necessary imports
-- Cover basic + edge cases
+- NO extra text before or after code
+- EXACTLY one public class
+- Class name MUST be {class_name}Test
+- Must compile without errors
+- Include imports
+- Use correct annotations
 
-Layer: {layer}
+Package:
+package com.example.demo.{layer};
 
 Class:
 {java_code}
@@ -76,6 +102,17 @@ Class:
     return clean_llm_output(raw)
 
 
+# 🔧 COMPILE CHECK
+def is_compilable():
+    result = subprocess.run(
+        ["mvn", "-q", "-DskipTests", "test-compile"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+    return result.returncode == 0
+
+
+# 🔁 MAIN PROCESS
 def process_files():
     src_dir = "src/main/java/com/example/demo"
     test_base_dir = "src/test/java/com/example/demo"
@@ -86,7 +123,7 @@ def process_files():
                 continue
 
             path = os.path.join(root, file)
-            print(f"🔍 Processing {path}")
+            print(f"\n🔍 Processing {path}")
 
             with open(path, "r") as f:
                 code = f.read()
@@ -97,7 +134,11 @@ def process_files():
             test_code = generate_test(code, class_name, layer)
 
             if not test_code:
-                print(f"❌ Failed for {class_name}")
+                print(f"❌ LLM failed for {class_name}")
+                continue
+
+            if not is_valid_java_test(test_code):
+                print(f"❌ Invalid structure: {class_name}")
                 continue
 
             test_path = os.path.join(
@@ -108,11 +149,20 @@ def process_files():
 
             os.makedirs(os.path.dirname(test_path), exist_ok=True)
 
-            # 🔥 ALWAYS overwrite (as you requested full regen)
-            with open(test_path, "w") as f:
+            # write temp file
+            temp_path = test_path + ".tmp"
+
+            with open(temp_path, "w") as f:
                 f.write(test_code)
 
-            print(f"✅ Generated {test_path}")
+            # replace and test compile
+            os.replace(temp_path, test_path)
+
+            if is_compilable():
+                print(f"✅ Valid test saved: {class_name}")
+            else:
+                os.remove(test_path)
+                print(f"❌ Compilation failed, discarded: {class_name}")
 
 
 if __name__ == "__main__":
