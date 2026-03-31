@@ -1,4 +1,4 @@
-name: CI Pipeline
+name: AI Test Generation + CI
 
 on:
   push:
@@ -10,21 +10,49 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Checkout
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # 2. Setup Java
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Build and Run Tests
-        run: mvn clean test
+      # 3. Setup Python
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
+      # 4. Install dependencies
+      - name: Install Python dependencies
+        run: pip install requests
+
+      # 5. Generate Tests using LLM
+      - name: Generate Tests using Groq
+        run: python scripts/generate_tests.py
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+
+      # 6. Run tests + coverage
+      - name: Build, Test, Coverage
+        run: mvn clean verify
+
+      # 7. Upload test results
       - name: Upload Test Results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-results
           path: target/surefire-reports/
+
+      # 8. Upload coverage report
+      - name: Upload Coverage Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: target/site/jacoco/
