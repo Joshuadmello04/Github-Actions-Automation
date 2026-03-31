@@ -1,6 +1,5 @@
 import os
 import requests
-import re
 import subprocess
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -12,14 +11,11 @@ def clean_llm_output(text):
     if not text:
         return None
 
-    # remove markdown
     text = text.replace("```java", "").replace("```", "")
 
-    # keep only from package
     if "package " in text:
         text = text[text.index("package "):]
 
-    # remove anything AFTER last closing brace
     last_brace = text.rfind("}")
     if last_brace != -1:
         text = text[:last_brace + 1]
@@ -27,7 +23,7 @@ def clean_llm_output(text):
     return text.strip()
 
 
-# 🧠 BASIC STRUCTURE VALIDATION
+# 🧠 BASIC VALIDATION
 def is_valid_java_test(code):
     if not code:
         return False
@@ -53,24 +49,24 @@ def detect_layer(path):
         return "misc"
 
 
-# 🤖 LLM CALL
+# 🤖 LLM GENERATION (SMART PROMPTS)
 def generate_test(java_code, class_name, layer):
 
     if layer == "controller":
         extra_rules = """
 - Use @WebMvcTest
-- Use @MockBean for dependencies
-- Use MockMvc for testing endpoints
+- Use @MockBean for service layer
+- Use MockMvc
+- DO NOT mock primitive or wrapper types (Long, String, Integer)
 """
     elif layer == "service":
         extra_rules = """
 - Use @Mock and @InjectMocks
-- Mock repository layer
+- Mock ONLY repository dependencies
+- DO NOT mock primitive or wrapper types
 """
     else:
-        extra_rules = """
-- Simple unit test
-"""
+        extra_rules = ""
 
     prompt = f"""
 You are a senior Java backend engineer.
@@ -85,6 +81,7 @@ STRICT RULES:
 - Must compile
 - Class name MUST be {class_name}Test
 - Package: com.example.demo.{layer}
+- Include necessary imports
 
 {extra_rules}
 
@@ -100,7 +97,9 @@ Class:
         },
         json={
             "model": MODEL,
-            "messages": [{"role": "user", "content": prompt}]
+            "messages": [
+                {"role": "user", "content": prompt}
+            ]
         }
     )
 
@@ -113,7 +112,8 @@ Class:
     raw = data["choices"][0]["message"]["content"]
     return clean_llm_output(raw)
 
-# 🔧 COMPILE CHECK
+
+# 🔧 COMPILE CHECK (VERY IMPORTANT)
 def is_compilable():
     result = subprocess.run(
         ["mvn", "-q", "-DskipTests", "test-compile"],
@@ -128,32 +128,25 @@ def process_files():
     src_dir = "src/main/java/com/example/demo"
     test_base_dir = "src/test/java/com/example/demo"
 
-    # Define a set of classes that don't need unit tests
-    # Using a set is faster for lookups as your list grows!
-    SKIP_LIST = {"DemoApplication", "ServletInitializer"}
-
     for root, _, files in os.walk(src_dir):
         for file in files:
             if not file.endswith(".java"):
                 continue
 
-            # 1. Get the class name first
-            class_name = file.replace(".java", "")
-
-            # 2. ❌ Skip useless classes immediately
-            if class_name in SKIP_LIST:
-                print(f"⏭ Skipping {class_name} (No test needed)")
-                continue
-
             path = os.path.join(root, file)
             print(f"\n🔍 Processing {path}")
+
+            class_name = file.replace(".java", "")
+            layer = detect_layer(path)
+
+            # 🚫 SKIP BAD TARGETS (CRITICAL FIX)
+            if layer in ["entity", "repository"] or class_name == "DemoApplication":
+                print(f"⏭ Skipping {class_name} ({layer})")
+                continue
 
             with open(path, "r") as f:
                 code = f.read()
 
-            layer = detect_layer(path)
-
-            # 3. Proceed to AI generation
             test_code = generate_test(code, class_name, layer)
 
             if not test_code:
@@ -172,21 +165,21 @@ def process_files():
 
             os.makedirs(os.path.dirname(test_path), exist_ok=True)
 
-            # write temp file
             temp_path = test_path + ".tmp"
+
+            # write temp file
             with open(temp_path, "w") as f:
                 f.write(test_code)
 
-            # replace and test compile
+            # replace and compile check
             os.replace(temp_path, test_path)
 
             if is_compilable():
                 print(f"✅ Valid test saved: {class_name}")
             else:
-                if os.path.exists(test_path):
-                    os.remove(test_path)
+                os.remove(test_path)
                 print(f"❌ Compilation failed, discarded: {class_name}")
 
-                
+
 if __name__ == "__main__":
     process_files()
