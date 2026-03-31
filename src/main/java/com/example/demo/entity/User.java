@@ -11,7 +11,6 @@ import lombok.NoArgsConstructor;
 
 @Entity
 @Data
-@NoArgsConstructor
 @Table(name = "users")
 public class User {
 
@@ -21,7 +20,10 @@ public class User {
 
     private String name;
     private int age;
+    
+    public User(){
 
+    }
     public User(Long id, String name,int age) {
         this.age = age;
         this.id = id;

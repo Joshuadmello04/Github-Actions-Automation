@@ -29,14 +29,14 @@ jobs:
 
       # 4. Install Python deps
       - name: Install Python dependencies
-        run: pip install requests
+        run: pip install groq requests
 
       # 5. Compile project (baseline check)
       - name: Compile Project
-        run: mvn clean compile
+        run: mvn clean compile -q
 
-      # 6. Generate Tests (ONLY ONCE)
-      - name: Generate Tests using Groq
+      # 6. Generate + Fix Tests using Groq (v2 script)
+      - name: Generate and Fix Tests using Groq
         run: python scripts/generate_tests.py
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -60,3 +60,11 @@ jobs:
         with:
           name: jacoco-report
           path: target/site/jacoco/
+
+      # 10. Upload generated test source files
+      - name: Upload Generated Test Sources
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-tests
+          path: src/test/java/
