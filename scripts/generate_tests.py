@@ -220,6 +220,15 @@ def generate_test(java_path):
 Rules:
 - JUnit 5 annotations only (@Test, @BeforeEach, @DisplayName)
 - {mock_note}
+- ALWAYS include ALL necessary imports explicitly, including:
+  import org.mockito.InjectMocks;
+  import org.mockito.Mock;
+  import org.mockito.junit.jupiter.MockitoExtension;
+  import org.junit.jupiter.api.extension.ExtendWith;
+  import org.junit.jupiter.api.Test;
+  import org.junit.jupiter.api.BeforeEach;
+  import static org.mockito.Mockito.*;
+  import static org.junit.jupiter.api.Assertions.*;
 - Test every public method — happy path + edge cases
 - Meaningful camelCase test names
 - Assertions on every test
