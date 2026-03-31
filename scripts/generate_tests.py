@@ -55,6 +55,23 @@ def detect_layer(path):
 
 # 🤖 LLM CALL
 def generate_test(java_code, class_name, layer):
+
+    if layer == "controller":
+        extra_rules = """
+- Use @WebMvcTest
+- Use @MockBean for dependencies
+- Use MockMvc for testing endpoints
+"""
+    elif layer == "service":
+        extra_rules = """
+- Use @Mock and @InjectMocks
+- Mock repository layer
+"""
+    else:
+        extra_rules = """
+- Simple unit test
+"""
+
     prompt = f"""
 You are a senior Java backend engineer.
 
@@ -64,15 +81,12 @@ STRICT RULES:
 - ONLY Java code
 - NO explanations
 - NO markdown
-- NO extra text before or after code
 - EXACTLY one public class
+- Must compile
 - Class name MUST be {class_name}Test
-- Must compile without errors
-- Include imports
-- Use correct annotations
+- Package: com.example.demo.{layer}
 
-Package:
-package com.example.demo.{layer};
+{extra_rules}
 
 Class:
 {java_code}
@@ -86,9 +100,7 @@ Class:
         },
         json={
             "model": MODEL,
-            "messages": [
-                {"role": "user", "content": prompt}
-            ]
+            "messages": [{"role": "user", "content": prompt}]
         }
     )
 
@@ -100,7 +112,6 @@ Class:
 
     raw = data["choices"][0]["message"]["content"]
     return clean_llm_output(raw)
-
 
 # 🔧 COMPILE CHECK
 def is_compilable():
@@ -117,9 +128,21 @@ def process_files():
     src_dir = "src/main/java/com/example/demo"
     test_base_dir = "src/test/java/com/example/demo"
 
+    # Define a set of classes that don't need unit tests
+    # Using a set is faster for lookups as your list grows!
+    SKIP_LIST = {"DemoApplication", "ServletInitializer"}
+
     for root, _, files in os.walk(src_dir):
         for file in files:
             if not file.endswith(".java"):
+                continue
+
+            # 1. Get the class name first
+            class_name = file.replace(".java", "")
+
+            # 2. ❌ Skip useless classes immediately
+            if class_name in SKIP_LIST:
+                print(f"⏭ Skipping {class_name} (No test needed)")
                 continue
 
             path = os.path.join(root, file)
@@ -128,9 +151,9 @@ def process_files():
             with open(path, "r") as f:
                 code = f.read()
 
-            class_name = file.replace(".java", "")
             layer = detect_layer(path)
 
+            # 3. Proceed to AI generation
             test_code = generate_test(code, class_name, layer)
 
             if not test_code:
@@ -151,7 +174,6 @@ def process_files():
 
             # write temp file
             temp_path = test_path + ".tmp"
-
             with open(temp_path, "w") as f:
                 f.write(test_code)
 
@@ -161,9 +183,10 @@ def process_files():
             if is_compilable():
                 print(f"✅ Valid test saved: {class_name}")
             else:
-                os.remove(test_path)
+                if os.path.exists(test_path):
+                    os.remove(test_path)
                 print(f"❌ Compilation failed, discarded: {class_name}")
 
-
+                
 if __name__ == "__main__":
     process_files()
